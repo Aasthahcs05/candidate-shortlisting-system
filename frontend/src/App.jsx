@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "./api";
 import {
   BarChart,
@@ -8,8 +8,11 @@ import {
   Tooltip,
   ResponsiveContainer
 } from "recharts";
+import "./App.css";
 
 function App() {
+  const [activePage, setActivePage] = useState("dashboard");
+
   const [candidateForm, setCandidateForm] = useState({
     name: "",
     email: "",
@@ -29,14 +32,15 @@ function App() {
   const [shortlisted, setShortlisted] = useState([]);
   const [aiRecommendation, setAiRecommendation] = useState("");
   const [search, setSearch] = useState("");
+  const [skillFilter, setSkillFilter] = useState("");
   const [loadingAI, setLoadingAI] = useState(false);
   const [message, setMessage] = useState("");
 
   const fetchCandidates = async () => {
     try {
       const res = await API.get(`/api/candidates?search=${search}`);
-      setCandidates(res.data.candidates);
-    } catch (error) {
+      setCandidates(res.data.candidates || []);
+    } catch {
       setMessage("Error fetching candidates");
     }
   };
@@ -45,37 +49,42 @@ function App() {
     fetchCandidates();
   }, [search]);
 
-  const handleCandidateChange = (e) => {
-    setCandidateForm({
-      ...candidateForm,
-      [e.target.name]: e.target.value
+  const filteredCandidates = useMemo(() => {
+    return candidates.filter((c) => {
+      if (!skillFilter) return true;
+      return c.skills?.some((s) =>
+        s.toLowerCase().includes(skillFilter.toLowerCase())
+      );
     });
+  }, [candidates, skillFilter]);
+
+  const stats = {
+    total: candidates.length,
+    high: shortlisted.filter((c) => c.matchLevel === "High").length,
+    medium: shortlisted.filter((c) => c.matchLevel === "Medium").length,
+    saved: candidates.filter((c) => c.isShortlisted).length
+  };
+
+  const handleCandidateChange = (e) => {
+    setCandidateForm({ ...candidateForm, [e.target.name]: e.target.value });
   };
 
   const handleJobChange = (e) => {
-    setJobForm({
-      ...jobForm,
-      [e.target.name]: e.target.value
-    });
+    setJobForm({ ...jobForm, [e.target.name]: e.target.value });
   };
 
   const addCandidate = async (e) => {
     e.preventDefault();
 
     try {
-      const payload = {
+      await API.post("/api/candidates", {
         name: candidateForm.name,
         email: candidateForm.email,
-        skills: candidateForm.skills
-          .split(",")
-          .map((skill) => skill.trim())
-          .filter(Boolean),
+        skills: candidateForm.skills.split(",").map((s) => s.trim()).filter(Boolean),
         experience: Number(candidateForm.experience),
         bio: candidateForm.bio,
         projects: candidateForm.projects
-      };
-
-      await API.post("/api/candidates", payload);
+      });
 
       setCandidateForm({
         name: "",
@@ -93,28 +102,20 @@ function App() {
     }
   };
 
-  const getJobPayload = () => {
-    return {
-      requiredSkills: jobForm.requiredSkills
-        .split(",")
-        .map((skill) => skill.trim())
-        .filter(Boolean),
-      minExperience: Number(jobForm.minExperience),
-      preferredSkills: jobForm.preferredSkills
-        .split(",")
-        .map((skill) => skill.trim())
-        .filter(Boolean)
-    };
-  };
+  const getJobPayload = () => ({
+    requiredSkills: jobForm.requiredSkills.split(",").map((s) => s.trim()).filter(Boolean),
+    minExperience: Number(jobForm.minExperience),
+    preferredSkills: jobForm.preferredSkills.split(",").map((s) => s.trim()).filter(Boolean)
+  });
 
   const basicShortlist = async (e) => {
     e.preventDefault();
 
     try {
       const res = await API.post("/api/match", getJobPayload());
-      setShortlisted(res.data.shortlistedCandidates);
-      setAiRecommendation("");
+      setShortlisted(res.data.shortlistedCandidates || []);
       setMessage("Basic shortlisting completed");
+      setActivePage("matching");
     } catch (error) {
       setMessage(error.response?.data?.message || "Error shortlisting candidates");
     }
@@ -124,9 +125,10 @@ function App() {
     try {
       setLoadingAI(true);
       const res = await API.post("/api/ai/shortlist", getJobPayload());
-      setShortlisted(res.data.basicRanking);
-      setAiRecommendation(res.data.aiRecommendation);
+      setShortlisted(res.data.basicRanking || []);
+      setAiRecommendation(res.data.aiRecommendation || "");
       setMessage("AI shortlisting completed");
+      setActivePage("analytics");
     } catch (error) {
       setMessage(error.response?.data?.message || "Error generating AI shortlist");
     } finally {
@@ -139,221 +141,220 @@ function App() {
       await API.post(`/api/candidates/${id}/save-shortlisted`);
       setMessage("Candidate saved as shortlisted");
       fetchCandidates();
-    } catch (error) {
+    } catch {
       setMessage("Error saving shortlisted candidate");
     }
   };
 
   return (
-    <div className="app">
-      <header className="hero">
-        <div>
-          <p className="tag">MERN + OpenRouter AI</p>
-          <h1>Candidate Profile Shortlisting System</h1>
-          <p>
-            Add candidates, enter job requirements, calculate skill match score,
-            and use AI to recommend the best-fit candidates.
-          </p>
-        </div>
-      </header>
+    <div className="layout">
+      <aside className="sidebar">
+        <h1>RecruitPro AI</h1>
+        <p>Enterprise Recruitment</p>
 
-      {message && <div className="message">{message}</div>}
+        <nav>
+          <button onClick={() => setActivePage("dashboard")} className={activePage === "dashboard" ? "active" : ""}>Dashboard</button>
+          <button onClick={() => setActivePage("candidates")} className={activePage === "candidates" ? "active" : ""}>Candidates</button>
+          <button onClick={() => setActivePage("matching")} className={activePage === "matching" ? "active" : ""}>Matching</button>
+          <button onClick={() => setActivePage("analytics")} className={activePage === "analytics" ? "active" : ""}>Analytics</button>
+        </nav>
 
-      <main className="grid">
-        <section className="card">
-          <h2>Add Candidate</h2>
-          <form onSubmit={addCandidate}>
-            <input
-              name="name"
-              placeholder="Candidate Name"
-              value={candidateForm.name}
-              onChange={handleCandidateChange}
-              required
-            />
+        <button className="new-btn" onClick={() => setActivePage("matching")}>+ New Requisition</button>
+      </aside>
 
-            <input
-              name="email"
-              placeholder="Email"
-              value={candidateForm.email}
-              onChange={handleCandidateChange}
-              required
-            />
-
-            <input
-              name="skills"
-              placeholder="Skills comma separated: React, Node.js, MongoDB"
-              value={candidateForm.skills}
-              onChange={handleCandidateChange}
-              required
-            />
-
-            <input
-              name="experience"
-              type="number"
-              placeholder="Experience in years"
-              value={candidateForm.experience}
-              onChange={handleCandidateChange}
-              required
-            />
-
-            <textarea
-              name="bio"
-              placeholder="Projects / Bio"
-              value={candidateForm.bio}
-              onChange={handleCandidateChange}
-            />
-
-            <textarea
-              name="projects"
-              placeholder="Project details"
-              value={candidateForm.projects}
-              onChange={handleCandidateChange}
-            />
-
-            <button type="submit">Add Candidate</button>
-          </form>
-        </section>
-
-        <section className="card">
-          <h2>Job Requirement</h2>
-          <form onSubmit={basicShortlist}>
-            <input
-              name="requiredSkills"
-              placeholder="Required Skills: React, Node.js"
-              value={jobForm.requiredSkills}
-              onChange={handleJobChange}
-              required
-            />
-
-            <input
-              name="minExperience"
-              type="number"
-              placeholder="Minimum Experience"
-              value={jobForm.minExperience}
-              onChange={handleJobChange}
-              required
-            />
-
-            <input
-              name="preferredSkills"
-              placeholder="Preferred Skills: AWS, MongoDB"
-              value={jobForm.preferredSkills}
-              onChange={handleJobChange}
-            />
-
-            <div className="button-row">
-              <button type="submit">Basic Shortlist</button>
-              <button type="button" onClick={aiShortlist}>
-                {loadingAI ? "AI Thinking..." : "AI Shortlist"}
-              </button>
-            </div>
-          </form>
-        </section>
-      </main>
-
-      <section className="card full">
-        <div className="section-header">
-          <h2>Candidate List</h2>
+      <main className="main">
+        <header className="topbar">
           <input
-            className="search"
-            placeholder="Search by name, email, or skill"
+            placeholder="Global candidate search..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-        </div>
+          <span>🔔</span>
+          <span>⚙️</span>
+          <div className="avatar">A</div>
+        </header>
 
-        <div className="candidate-list">
-          {candidates.map((candidate) => (
-            <div className="candidate-card" key={candidate._id}>
-              <h3>{candidate.name}</h3>
-              <p>{candidate.email}</p>
+        {message && <div className="alert">{message}</div>}
+
+        {activePage === "dashboard" && (
+          <>
+            <section className="hero">
+              <h2>Elevate Your Talent Acquisition with RecruitPro AI</h2>
               <p>
-                <strong>Skills:</strong> {candidate.skills.join(", ")}
+                Identify, match, and shortlist the best candidates using skill matching and AI-powered recommendations.
               </p>
-              <p>
-                <strong>Experience:</strong> {candidate.experience} years
-              </p>
-              {candidate.bio && (
-                <p>
-                  <strong>Bio:</strong> {candidate.bio}
-                </p>
-              )}
-              {candidate.isShortlisted && (
-                <span className="badge saved">Saved Shortlisted</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {shortlisted.length > 0 && (
-        <section className="card full">
-          <h2>Shortlisted Candidates</h2>
-
-          <div className="chart-box">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={shortlisted}>
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="matchScore" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="candidate-list">
-            {shortlisted.map((candidate) => (
-              <div className="candidate-card" key={candidate._id}>
-                <div className="candidate-top">
-                  <h3>{candidate.name}</h3>
-                  <span className={`badge ${candidate.matchLevel.toLowerCase()}`}>
-                    {candidate.matchLevel}
-                  </span>
-                </div>
-
-                <p>
-                  <strong>Email:</strong> {candidate.email}
-                </p>
-
-                <p>
-                  <strong>Match Score:</strong> {candidate.matchScore}%
-                </p>
-
-                <p>
-                  <strong>Skill Overlap:</strong> {candidate.skillOverlap}%
-                </p>
-
-                <p>
-                  <strong>Skills Matched:</strong>{" "}
-                  {candidate.matchedSkills.length > 0
-                    ? candidate.matchedSkills.join(", ")
-                    : "None"}
-                </p>
-
-                <p>
-                  <strong>Experience:</strong> {candidate.experience} years
-                </p>
-
-                <p>
-                  <strong>Experience Criteria:</strong>{" "}
-                  {candidate.experienceEligible ? "Eligible" : "Not Eligible"}
-                </p>
-
-                <button onClick={() => saveShortlisted(candidate._id)}>
-                  Save Shortlisted
-                </button>
+              <div>
+                <button onClick={() => setActivePage("matching")}>New Requisition</button>
+                <button className="outline" onClick={() => setActivePage("candidates")}>View Candidates</button>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            </section>
 
-      {aiRecommendation && (
-        <section className="card full ai-box">
-          <h2>AI Recommendation</h2>
-          <pre>{aiRecommendation}</pre>
-        </section>
-      )}
+            <section className="stats">
+              <div><span>👥</span><p>Total Candidates</p><h3>{stats.total}</h3></div>
+              <div><span>🎯</span><p>High Match Candidates</p><h3>{stats.high}</h3></div>
+              <div><span>📊</span><p>Medium Match Candidates</p><h3>{stats.medium}</h3></div>
+              <div><span>⭐</span><p>Saved Shortlisted</p><h3>{stats.saved}</h3></div>
+            </section>
+
+            <section className="feature-grid">
+              <div className="feature-card">
+                <h3>Cognitive AI Matching</h3>
+                <p>Analyze profiles beyond simple keywords and get intelligent candidate suggestions.</p>
+              </div>
+              <div className="feature-card">
+                <h3>Real-time Pipeline Analytics</h3>
+                <p>Track match scores, shortlisted profiles, and recruitment quality visually.</p>
+              </div>
+            </section>
+          </>
+        )}
+
+        {activePage === "candidates" && (
+          <section>
+            <div className="page-title">
+              <h2>Candidate Management</h2>
+              <p>Streamline your hiring pipeline with AI-assisted profile analysis.</p>
+            </div>
+
+            <div className="candidate-layout">
+              <div className="dark-panel">
+                <h3>Recruiter Pro-Tip</h3>
+                <p>Add clean skills like React, Node.js, MongoDB, AWS for better matching accuracy.</p>
+              </div>
+
+              <form className="form-card" onSubmit={addCandidate}>
+                <input name="name" placeholder="Full Name" value={candidateForm.name} onChange={handleCandidateChange} required />
+                <input name="email" placeholder="Email Address" value={candidateForm.email} onChange={handleCandidateChange} required />
+                <input name="skills" placeholder="Skills: React, Node.js, MongoDB" value={candidateForm.skills} onChange={handleCandidateChange} required />
+                <input name="experience" type="number" placeholder="Years of Experience" value={candidateForm.experience} onChange={handleCandidateChange} required />
+                <textarea name="bio" placeholder="Professional Bio" value={candidateForm.bio} onChange={handleCandidateChange} />
+                <textarea name="projects" placeholder="Projects" value={candidateForm.projects} onChange={handleCandidateChange} />
+                <button>Add to Pipeline</button>
+              </form>
+            </div>
+
+            <div className="filters">
+              <input placeholder="Search by name, email, or skill..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input placeholder="Filter by skill..." value={skillFilter} onChange={(e) => setSkillFilter(e.target.value)} />
+              <span>Showing {filteredCandidates.length} Candidates</span>
+            </div>
+
+            <div className="cards">
+              {filteredCandidates.map((c) => (
+                <div className="profile-card" key={c._id}>
+                  <div className="profile-icon">{c.name?.[0]}</div>
+                  <h3>{c.name}</h3>
+                  <p>{c.email}</p>
+                  <strong>{c.experience} years experience</strong>
+                  <p>{c.bio || c.projects || "No bio added"}</p>
+                  <div className="skills">
+                    {c.skills?.map((s) => <span key={s}>{s}</span>)}
+                  </div>
+                  {c.isShortlisted && <div className="saved">Saved Shortlisted</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {activePage === "matching" && (
+          <section className="matching-grid">
+            <div>
+              <form className="match-form" onSubmit={basicShortlist}>
+                <h2>Job Match Intelligence</h2>
+                <p>Configure parameters for candidate matching.</p>
+
+                <label>Required Skills</label>
+                <input name="requiredSkills" placeholder="React, Node.js" value={jobForm.requiredSkills} onChange={handleJobChange} required />
+
+                <label>Preferred Skills</label>
+                <input name="preferredSkills" placeholder="MongoDB, AWS" value={jobForm.preferredSkills} onChange={handleJobChange} />
+
+                <label>Minimum Experience</label>
+                <input name="minExperience" type="number" placeholder="2" value={jobForm.minExperience} onChange={handleJobChange} required />
+
+                <button type="button" onClick={aiShortlist}>{loadingAI ? "AI Thinking..." : "AI Shortlist"}</button>
+                <button className="outline-dark" type="submit">Basic Shortlist</button>
+              </form>
+
+              <div className="tip">
+                <h3>Recruiter Pro-Tip</h3>
+                <p>AI shortlisting considers semantic relevance, experience, skills, bio and projects.</p>
+              </div>
+            </div>
+
+            <div>
+              <div className="page-title">
+                <h2>Top Matches Found</h2>
+                <p>{shortlisted.length} potential candidates identified.</p>
+              </div>
+
+              <div className="match-cards">
+                {shortlisted.map((c) => (
+                  <div className="match-card" key={c._id}>
+                    <div className="candidate-top">
+                      <h3>{c.name}</h3>
+                      <span className={`badge ${c.matchLevel?.toLowerCase()}`}>{c.matchLevel}</span>
+                    </div>
+                    <h2>{c.matchScore}%</h2>
+                    <p>{c.email}</p>
+                    <p><b>Matched Skills:</b></p>
+                    <div className="skills">
+                      {c.matchedSkills?.length ? c.matchedSkills.map((s) => <span key={s}>{s}</span>) : <span>None</span>}
+                    </div>
+                    <p>{c.experience} years experience</p>
+                    <button onClick={() => saveShortlisted(c._id)}>Save Shortlist</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activePage === "analytics" && (
+          <section>
+            <div className="page-title">
+              <h2>AI Match Intelligence</h2>
+              <p>Real-time candidate pool analysis and AI recommendations.</p>
+            </div>
+
+            <div className="analytics-card">
+              <h3>Match Score Distribution</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={shortlisted}>
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="matchScore" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="insight-grid">
+              <div className="ai-summary">
+                <h3>AI Analysis Summary</h3>
+                <pre>{aiRecommendation || "Run AI Shortlist to generate candidate explanation, strengths, weaknesses and interview questions."}</pre>
+              </div>
+
+              <div className="questions">
+                <h3>AI-Generated Interview Questions</h3>
+                <div>
+                  <b>Focus: Technical</b>
+                  <p>Explain one project where your skills directly matched the job requirement.</p>
+                </div>
+                <div>
+                  <b>Focus: Problem Solving</b>
+                  <p>Describe a challenging technical issue and how you solved it.</p>
+                </div>
+                <div>
+                  <b>Focus: Adaptability</b>
+                  <p>How do you learn a new technology required for a project?</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
     </div>
   );
 }
