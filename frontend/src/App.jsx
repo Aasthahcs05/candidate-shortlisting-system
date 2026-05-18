@@ -36,6 +36,12 @@ function App() {
   const [loadingAI, setLoadingAI] = useState(false);
   const [message, setMessage] = useState("");
 
+  const [chatMessages, setChatMessages] = useState([
+    { role: "ai", content: "Hello! I am your AI HR Assistant. You can ask me to find candidates, analyze their skills, or help with drafting emails. How can I assist you today?" }
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [loadingChat, setLoadingChat] = useState(false);
+
   const fetchCandidates = async () => {
     try {
       const res = await API.get(`/api/candidates?search=${search}`);
@@ -146,6 +152,26 @@ function App() {
     }
   };
 
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const newMessages = [...chatMessages, { role: "user", content: chatInput }];
+    setChatMessages(newMessages);
+    setChatInput("");
+    setLoadingChat(true);
+
+    try {
+      const apiMessages = newMessages.slice(1); // excluding the initial welcome message from the history to avoid confusion
+      const res = await API.post("/api/ai/chat", { messages: apiMessages });
+      setChatMessages([...newMessages, { role: "ai", content: res.data.reply }]);
+    } catch (error) {
+      setChatMessages([...newMessages, { role: "ai", content: "Sorry, I encountered an error. Please try again." }]);
+    } finally {
+      setLoadingChat(false);
+    }
+  };
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -157,6 +183,7 @@ function App() {
           <button onClick={() => setActivePage("candidates")} className={activePage === "candidates" ? "active" : ""}>Candidates</button>
           <button onClick={() => setActivePage("matching")} className={activePage === "matching" ? "active" : ""}>Matching</button>
           <button onClick={() => setActivePage("analytics")} className={activePage === "analytics" ? "active" : ""}>Analytics</button>
+          <button onClick={() => setActivePage("ai-assistant")} className={activePage === "ai-assistant" ? "active" : ""}>AI Assistant</button>
         </nav>
 
         <button className="new-btn" onClick={() => setActivePage("matching")}>+ New Requisition</button>
@@ -351,6 +378,42 @@ function App() {
                   <p>How do you learn a new technology required for a project?</p>
                 </div>
               </div>
+            </div>
+          </section>
+        )}
+
+        {activePage === "ai-assistant" && (
+          <section className="chat-section">
+            <div className="page-title">
+              <h2>AI HR Assistant</h2>
+              <p>Chat with your intelligent recruitment copilot.</p>
+            </div>
+            <div className="chat-container">
+              <div className="chat-messages">
+                {chatMessages.map((msg, idx) => (
+                  <div key={idx} className={`message ${msg.role}`}>
+                    <div className="bubble">
+                      {msg.role === "ai" ? "🤖 " : "👤 "}
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                {loadingChat && (
+                  <div className="message ai">
+                    <div className="bubble">🤖 Typing...</div>
+                  </div>
+                )}
+              </div>
+              <form className="chat-input-form" onSubmit={handleChatSubmit}>
+                <input
+                  type="text"
+                  placeholder="Ask about candidates, skills, or draft emails..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  disabled={loadingChat}
+                />
+                <button type="submit" disabled={loadingChat}>Send</button>
+              </form>
             </div>
           </section>
         )}

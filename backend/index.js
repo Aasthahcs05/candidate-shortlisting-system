@@ -344,6 +344,69 @@ Task:
   }
 });
 
+app.post("/api/ai/chat", async (req, res) => {
+  try {
+    const { messages } = req.body;
+
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({
+        success: false,
+        message: "messages must be an array"
+      });
+    }
+
+    // Fetch all candidates to provide as context
+    const candidates = await Candidate.find();
+    
+    // Summarize candidates for context to avoid token limits
+    const candidateSummary = candidates.map(c => 
+      `- ${c.name} (Email: ${c.email}, Exp: ${c.experience}yrs). Skills: ${c.skills.join(", ")}. Status: ${c.isShortlisted ? "Shortlisted" : "Not Shortlisted"}`
+    ).join("\n");
+
+    const systemPrompt = `You are an expert HR recruitment assistant for the 'Candidate Shortlisting System'.
+Here is the current list of candidates in the database:
+${candidateSummary || "No candidates in the database yet."}
+
+Your job is to answer the user's questions regarding these candidates, suggest matches, and assist with general recruitment tasks. Be concise and professional.`;
+
+    const aiMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages
+    ];
+
+    const aiResponse = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: "openai/gpt-4o-mini",
+        max_tokens: 800,
+        messages: aiMessages
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+          "X-Title": "Candidate Shortlisting System"
+        }
+      }
+    );
+
+    const reply = aiResponse.data?.choices?.[0]?.message?.content || "Sorry, I am unable to process that right now.";
+
+    res.json({
+      success: true,
+      reply
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error communicating with AI",
+      error: error.response?.data || error.message
+    });
+  }
+});
+
 app.post("/api/candidates/:id/save-shortlisted", async (req, res) => {
   try {
     const candidate = await Candidate.findByIdAndUpdate(
