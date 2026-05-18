@@ -162,7 +162,10 @@ function App() {
     setLoadingChat(true);
 
     try {
-      const apiMessages = newMessages.slice(1); // excluding the initial welcome message from the history to avoid confusion
+      const apiMessages = newMessages.slice(1).map(msg => ({
+        role: msg.role === "ai" ? "assistant" : msg.role,
+        content: msg.content
+      })); // excluding the initial welcome message from the history to avoid confusion
       const res = await API.post("/api/ai/chat", { messages: apiMessages });
       setChatMessages([...newMessages, { role: "ai", content: res.data.reply }]);
     } catch (error) {
